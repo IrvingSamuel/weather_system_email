@@ -407,21 +407,21 @@ class MainWindow(QMainWindow):
         status_label = QLabel()
         if self.db.connect():
             status_label.setText("✅ Banco: Conectado")
-            status_label.setStyleSheet("background-color: #d4edda; padding: 10px; border-radius: 5px;")
+            status_label.setStyleSheet("background-color: #28a745; color: white; padding: 10px; border-radius: 5px; font-weight: bold;")
             self.db.disconnect()
         else:
             status_label.setText("❌ Banco: Desconectado")
-            status_label.setStyleSheet("background-color: #f8d7da; padding: 10px; border-radius: 5px;")
+            status_label.setStyleSheet("background-color: #dc3545; color: white; padding: 10px; border-radius: 5px; font-weight: bold;")
         info_layout.addWidget(status_label)
         
         # Card 2: Hora
         time_label = QLabel(f"🕐 {datetime.now().strftime('%H:%M:%S')}")
-        time_label.setStyleSheet("background-color: #cfe2ff; padding: 10px; border-radius: 5px;")
+        time_label.setStyleSheet("background-color: #0d6efd; color: white; padding: 10px; border-radius: 5px; font-weight: bold;")
         info_layout.addWidget(time_label)
         
         # Card 3: Total de UTCs
-        utc_label = QLabel("📍 UTCs: Carregando...")
-        utc_label.setStyleSheet("background-color: #e2e3e5; padding: 10px; border-radius: 5px;")
+        utc_label = QLabel(f"📍 UTCs: {len(SELECTED_UTCS)} cadastradas")
+        utc_label.setStyleSheet("background-color: #6c757d; color: white; padding: 10px; border-radius: 5px; font-weight: bold;")
         info_layout.addWidget(utc_label)
         
         layout.addLayout(info_layout)
@@ -504,30 +504,73 @@ class MainWindow(QMainWindow):
         return widget
     
     def create_weather_tab(self):
-        """Criar aba Previsão"""
+        """Criar aba Previsão com integração da API"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        layout.addWidget(QLabel("🌤️ Previsão de Tempo"))
+        # Título
+        title = QLabel("🌤️ Previsão de Tempo - Dados em Tempo Real")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        layout.addWidget(title)
         
         # Filtros
         filter_layout = QHBoxLayout()
         
-        utc_combo = QComboBox()
-        for utc in SELECTED_UTCS:
-            utc_combo.addItem(f"{utc['city']} ({utc['utc_name']})")
         filter_layout.addWidget(QLabel("Selecione UTC:"))
-        filter_layout.addWidget(utc_combo)
+        self.weather_utc_combo = QComboBox()
+        for utc in SELECTED_UTCS:
+            self.weather_utc_combo.addItem(f"{utc['city']} ({utc['utc_name']})", utc['utc_id'])
+        filter_layout.addWidget(self.weather_utc_combo)
         
+        # Botão atualizar
+        refresh_weather_btn = QPushButton("🔄 Atualizar Dados")
+        refresh_weather_btn.clicked.connect(self.load_weather_data)
+        filter_layout.addWidget(refresh_weather_btn)
+        
+        filter_layout.addStretch()
         layout.addLayout(filter_layout)
         
         # Tabela de previsão
-        table = QTableWidget()
-        table.setColumnCount(7)
-        table.setHorizontalHeaderLabels([
-            "Data", "Temperatura", "Condição", "Umidade", "Vento", "Clima", "Ações"
+        self.weather_table = QTableWidget()
+        self.weather_table.setColumnCount(7)
+        self.weather_table.setHorizontalHeaderLabels([
+            "Data", "Temperatura", "Condição", "Umidade", "Vento", "Clima", "Última Atualização"
         ])
-        layout.addWidget(table)
+        self.weather_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.weather_table)
+        
+        # Botões de ação
+        btn_layout = QHBoxLayout()
+        
+        update_api_btn = QPushButton("🌐 Atualizar da API")
+        update_api_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                font-size: 13px;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+        """)
+        update_api_btn.clicked.connect(self.update_weather_from_api)
+        btn_layout.addWidget(update_api_btn)
+        
+        view_all_btn = QPushButton("👁️ Ver Todas as UTCs")
+        view_all_btn.clicked.connect(self.load_all_weather_data)
+        btn_layout.addWidget(view_all_btn)
+        
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        
+        # Carregar dados iniciais (silenciosamente, sem popup)
+        try:
+            self.load_all_weather_data()
+        except:
+            pass  # Ignorar erros no carregamento inicial
         
         return widget
     
@@ -981,6 +1024,270 @@ class MainWindow(QMainWindow):
                 f"Erro ao enviar email:\n\n{message}\n\n"
                 f"Verifique:\n"
                 f"• Configurações de email em config.py\n"
+                f"• Conexão com internet\n"
+                f"• Logs do sistema"
+            )
+    
+    def load_weather_data(self):
+        """Carregar dados meteorológicos do banco para a UTC selecionada"""
+        try:
+            # Pegar UTC selecionada
+            utc_id = self.weather_utc_combo.currentData()
+            
+            db = DatabaseConnection()
+            if not db.connect():
+                self.statusBar.showMessage("Erro ao conectar ao banco de dados")
+                return
+            
+            weather_repo = WeatherRepository(db)
+            
+            # Buscar dados de clima
+            weather_data = weather_repo.get_latest_weather(utc_id)
+            
+            # Limpar tabela
+            self.weather_table.setRowCount(0)
+            
+            if weather_data:
+                # Adicionar linha
+                self.weather_table.setRowCount(1)
+                
+                # Data
+                forecast_date = weather_data.get('forecast_date')
+                if forecast_date:
+                    self.weather_table.setItem(0, 0, QTableWidgetItem(forecast_date.strftime('%d/%m/%Y')))
+                else:
+                    self.weather_table.setItem(0, 0, QTableWidgetItem("N/A"))
+                
+                # Temperatura
+                temp = weather_data.get('temperature')
+                self.weather_table.setItem(0, 1, QTableWidgetItem(f"{temp}°C" if temp else "N/A"))
+                
+                # Condição
+                condition = weather_data.get('weather_condition', 'N/A')
+                self.weather_table.setItem(0, 2, QTableWidgetItem(condition))
+                
+                # Umidade
+                humidity = weather_data.get('humidity')
+                self.weather_table.setItem(0, 3, QTableWidgetItem(f"{humidity}%" if humidity else "N/A"))
+                
+                # Vento
+                wind = weather_data.get('wind_speed')
+                self.weather_table.setItem(0, 4, QTableWidgetItem(f"{wind} km/h" if wind else "N/A"))
+                
+                # Clima
+                climate = weather_data.get('climate_type', 'N/A')
+                self.weather_table.setItem(0, 5, QTableWidgetItem(climate))
+                
+                # Última atualização
+                last_update = weather_data.get('last_updated')
+                if last_update:
+                    self.weather_table.setItem(0, 6, QTableWidgetItem(last_update.strftime('%d/%m/%Y %H:%M:%S')))
+                else:
+                    self.weather_table.setItem(0, 6, QTableWidgetItem("N/A"))
+                
+                self.statusBar.showMessage("Dados carregados com sucesso")
+            else:
+                # Sem dados - mostrar mensagem informativa na própria tabela
+                self.weather_table.setRowCount(1)
+                no_data_item = QTableWidgetItem("📊 Sem dados - Clique em 'Atualizar da API' para buscar dados atuais")
+                no_data_item.setForeground(QColor("#ffc107"))  # Cor amarela
+                self.weather_table.setItem(0, 0, no_data_item)
+                for col in range(1, 7):
+                    self.weather_table.setItem(0, col, QTableWidgetItem(""))
+                
+                self.statusBar.showMessage("Nenhum dado encontrado - Atualize da API")
+            
+            db.disconnect()
+            
+        except Exception as e:
+            self.statusBar.showMessage(f"Erro ao carregar dados: {str(e)}")
+    
+    def load_all_weather_data(self):
+        """Carregar dados meteorológicos de todas as UTCs"""
+        try:
+            db = DatabaseConnection()
+            if not db.connect():
+                self.statusBar.showMessage("Erro ao conectar ao banco de dados")
+                return
+            
+            utc_repo = UTCRepository(db)
+            weather_repo = WeatherRepository(db)
+            
+            utcs = utc_repo.get_all_utcs()
+            
+            # Limpar tabela
+            self.weather_table.setRowCount(0)
+            
+            has_data = False
+            
+            for utc in utcs:
+                weather_data = weather_repo.get_latest_weather(utc.get('utc_id'))
+                
+                if weather_data:
+                    has_data = True
+                    row = self.weather_table.rowCount()
+                    self.weather_table.setRowCount(row + 1)
+                    
+                    # Data
+                    forecast_date = weather_data.get('forecast_date')
+                    date_str = forecast_date.strftime('%d/%m/%Y') if forecast_date else "N/A"
+                    date_item = QTableWidgetItem(f"{utc.get('city_name')} - {date_str}")
+                    self.weather_table.setItem(row, 0, date_item)
+                    
+                    # Temperatura
+                    temp = weather_data.get('temperature')
+                    self.weather_table.setItem(row, 1, QTableWidgetItem(f"{temp}°C" if temp else "N/A"))
+                    
+                    # Condição
+                    condition = weather_data.get('weather_condition', 'N/A')
+                    self.weather_table.setItem(row, 2, QTableWidgetItem(condition))
+                    
+                    # Umidade
+                    humidity = weather_data.get('humidity')
+                    self.weather_table.setItem(row, 3, QTableWidgetItem(f"{humidity}%" if humidity else "N/A"))
+                    
+                    # Vento
+                    wind = weather_data.get('wind_speed')
+                    self.weather_table.setItem(row, 4, QTableWidgetItem(f"{wind} km/h" if wind else "N/A"))
+                    
+                    # Clima
+                    climate = weather_data.get('climate_type', 'N/A')
+                    self.weather_table.setItem(row, 5, QTableWidgetItem(climate))
+                    
+                    # Última atualização
+                    last_update = weather_data.get('last_updated')
+                    if last_update:
+                        self.weather_table.setItem(row, 6, QTableWidgetItem(last_update.strftime('%d/%m/%Y %H:%M:%S')))
+                    else:
+                        self.weather_table.setItem(row, 6, QTableWidgetItem("N/A"))
+            
+            if has_data:
+                self.statusBar.showMessage(f"Dados de {self.weather_table.rowCount()} UTCs carregados")
+            else:
+                # Sem dados - mostrar mensagem informativa
+                self.weather_table.setRowCount(1)
+                no_data_item = QTableWidgetItem("📊 Nenhum dado meteorológico encontrado - Clique em 'Atualizar da API' para buscar dados atuais")
+                no_data_item.setForeground(QColor("#ffc107"))  # Cor amarela
+                self.weather_table.setItem(0, 0, no_data_item)
+                for col in range(1, 7):
+                    self.weather_table.setItem(0, col, QTableWidgetItem(""))
+                
+                self.statusBar.showMessage("Nenhum dado encontrado - Atualize da API")
+            
+            db.disconnect()
+            
+        except Exception as e:
+            self.statusBar.showMessage(f"Erro ao carregar dados: {str(e)}")
+    
+    def update_weather_from_api(self):
+        """Atualizar dados meteorológicos da API"""
+        reply = QMessageBox.question(
+            self,
+            "Atualizar da API",
+            "Deseja buscar dados ATUAIS da WeatherAPI.com?\n\n"
+            "Isso irá:\n"
+            "• Conectar na WeatherAPI.com\n"
+            "• Buscar clima atual de todas as UTCs\n"
+            "• Traduzir condições para português\n"
+            "• Atualizar banco de dados\n\n"
+            "Continuar?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        try:
+            self.statusBar.showMessage("Buscando dados da API...")
+            self.log_text.append("🌐 Conectando na WeatherAPI.com...")
+            
+            from src.weather_api import WeatherAPIClient, get_location_for_utc
+            
+            api_client = WeatherAPIClient(WEATHER_API_CONFIG['api_key'])
+            
+            db = DatabaseConnection()
+            if not db.connect():
+                raise Exception("Falha ao conectar ao banco de dados")
+            
+            utc_repo = UTCRepository(db)
+            utcs = utc_repo.get_all_utcs()
+            
+            # Conectar diretamente para atualizar dados
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+            
+            # Limpar dados antigos
+            cur.execute("DELETE FROM weather_predictions")
+            conn.commit()
+            
+            success_count = 0
+            
+            for utc in utcs:
+                utc_name = utc.get('utc_name')
+                city_name = utc.get('city_name')
+                utc_id = utc.get('utc_id')
+                
+                location = city_name if city_name else get_location_for_utc(utc_name)
+                
+                self.log_text.append(f"  Buscando: {city_name}...")
+                
+                weather_data = api_client.get_current_weather(location)
+                
+                if weather_data:
+                    climate_type = api_client.determine_climate_type(
+                        location,
+                        weather_data['temperature'],
+                        weather_data['humidity']
+                    )
+                    
+                    cur.execute("""
+                        INSERT INTO weather_predictions 
+                        (utc_id, forecast_date, temperature, weather_condition, 
+                         humidity, wind_speed, climate_type)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        utc_id,
+                        date.today(),
+                        weather_data['temperature'],
+                        weather_data['weather_condition'],
+                        weather_data['humidity'],
+                        weather_data['wind_speed'],
+                        climate_type
+                    ))
+                    
+                    conn.commit()
+                    success_count += 1
+                    self.log_text.append(f"  ✓ {city_name}: {weather_data['temperature']}°C - {weather_data['weather_condition']}")
+            
+            cur.close()
+            conn.close()
+            db.disconnect()
+            
+            self.log_text.append(f"✅ {success_count}/{len(utcs)} UTCs atualizadas com sucesso!")
+            self.statusBar.showMessage("Dados atualizados da API")
+            
+            QMessageBox.information(
+                self,
+                "Atualização Concluída! 🎉",
+                f"Dados atualizados com sucesso!\n\n"
+                f"UTCs atualizadas: {success_count}/{len(utcs)}\n"
+                f"Fonte: WeatherAPI.com\n"
+                f"Idioma: Português\n\n"
+                f"Os dados foram salvos no banco de dados."
+            )
+            
+            # Recarregar dados na tabela
+            self.load_all_weather_data()
+            
+        except Exception as e:
+            self.log_text.append(f"❌ Erro: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "Erro ao Atualizar",
+                f"Erro ao buscar dados da API:\n\n{str(e)}\n\n"
+                f"Verifique:\n"
+                f"• API Key em config.py\n"
                 f"• Conexão com internet\n"
                 f"• Logs do sistema"
             )
