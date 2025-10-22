@@ -28,10 +28,10 @@ DB_CONNECTION_STRING = (
 # ============================================================
 
 EMAIL_CONFIG = {
-    'smtp_server': 'smtp.hostinger.com',
+    'smtp_server': 'smtp.example.com',
     'smtp_port': 465,                 # Porta SSL
-    'sender_email': 'no-reply@rezum.me',
-    'sender_password': 'Rezumme@3',
+    'sender_email': 'no-reply@example.com',
+    'sender_password': 'example',
     'use_tls': False,                 # Usar SSL, não TLS
     'use_ssl': True,                  # SSL na porta 465
 }
